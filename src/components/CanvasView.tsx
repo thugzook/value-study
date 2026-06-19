@@ -1,6 +1,14 @@
 import { useEffect, useRef } from 'react'
 import type { Coverage, Settings } from '../lib/image'
-import { toLuma, gaussBlur, computeThresholds, evenLevels, process, sigmaFor } from '../lib/image'
+import {
+  toLuma,
+  medianBlur,
+  medianRadiusFor,
+  computeThresholds,
+  evenLevels,
+  process,
+  despeckleMinArea,
+} from '../lib/image'
 import { makeWorking } from '../lib/load'
 import type { Source } from '../lib/load'
 
@@ -49,14 +57,14 @@ export default function CanvasView({ source, settings, compare, onCoverage }: Pr
         return
       }
 
-      const sigma = sigmaFor(settings.squint, w, h)
+      const radius = medianRadiusFor(settings.squint, w, h)
       if (!blurRef.current || blurRef.current.squint !== settings.squint) {
-        blurRef.current = { squint: settings.squint, data: gaussBlur(luma, w, h, sigma) }
+        blurRef.current = { squint: settings.squint, data: medianBlur(luma, w, h, radius) }
       }
       const blurred = blurRef.current.data
       const thresholds = computeThresholds(blurred, settings.tones, settings.mode, settings.balance)
       const levels = evenLevels(settings.tones)
-      const { rgba, coverage } = process(blurred, thresholds, levels)
+      const { rgba, coverage } = process(blurred, w, thresholds, levels, despeckleMinArea(w, h))
       const out = ctx.createImageData(w, h)
       out.data.set(rgba)
       ctx.putImageData(out, 0, 0)

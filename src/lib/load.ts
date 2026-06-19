@@ -1,6 +1,14 @@
 // Browser-side image loading (HEIC + EXIF), working-size canvas, and export.
 import type { Settings } from './image'
-import { toLuma, gaussBlur, computeThresholds, evenLevels, process, sigmaFor } from './image'
+import {
+  toLuma,
+  medianBlur,
+  medianRadiusFor,
+  computeThresholds,
+  evenLevels,
+  process,
+  despeckleMinArea,
+} from './image'
 
 export interface Source {
   bitmap: ImageBitmap
@@ -83,11 +91,11 @@ export async function exportStudy(src: Source, settings: Settings): Promise<void
   ctx.drawImage(src.bitmap, 0, 0)
   const id = ctx.getImageData(0, 0, src.width, src.height)
   const luma = toLuma(id.data)
-  const sigma = sigmaFor(settings.squint, src.width, src.height)
-  const blurred = gaussBlur(luma, src.width, src.height, sigma)
+  const radius = medianRadiusFor(settings.squint, src.width, src.height)
+  const blurred = medianBlur(luma, src.width, src.height, radius)
   const thresholds = computeThresholds(blurred, settings.tones, settings.mode, settings.balance)
   const levels = evenLevels(settings.tones)
-  const { rgba } = process(blurred, thresholds, levels)
+  const { rgba } = process(blurred, src.width, thresholds, levels, despeckleMinArea(src.width, src.height))
   const out = ctx.createImageData(src.width, src.height)
   out.data.set(rgba)
   ctx.putImageData(out, 0, 0)

@@ -13,9 +13,13 @@ Vite 5/8 + React 19 + TypeScript + Tailwind 3. **Node 20** (`.nvmrc`). Deploy: V
   Params, verbatimModuleSyntax, erasableSyntaxOnly — use `import type`, no enums)
 
 ## Architecture
-- `src/lib/image.ts` — **pure** pipeline, no DOM: `toLuma` (Rec.709) → `gaussBlur`
-  (fast 3-pass box blur) → `computeThresholds` (Otsu for 2 tones, k-means for 3+,
-  with balance shift) → `process` (posterize + coverage). Keep this DOM-free.
+- `src/lib/image.ts` — **pure** pipeline, no DOM: `toLuma` (Rec.709) → `medianBlur`
+  (edge-preserving "squint" — separable sliding-window median; keeps small bright
+  accents like eye-whites from muddying into mid-tones the way a blur would) →
+  `computeThresholds` (Otsu for 2 tones, k-means for 3+, with balance shift) →
+  `process` (posterize → `despeckle` small value-islands into neighbours →
+  coverage). Keep this DOM-free. `gaussBlur`/`sigmaFor` remain as available
+  helpers but are no longer in the active pipeline.
 - `src/lib/load.ts` — DOM glue: HEIC (lazy `heic2any`) + EXIF decode, working-size
   canvas (capped 1600px), full-res `exportStudy`.
 - `src/components/CanvasView.tsx` — owns the canvas; caches luma + blurred result

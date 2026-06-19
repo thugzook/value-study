@@ -230,24 +230,159 @@ export function sigmaFor(squint: number, w: number, h: number): number {
   return (squint / 100) * 0.04 * Math.min(w, h)
 }
 
+// --- Median filter: edge-preserving "squint" ------------------------------
+// A separable sliding-window median (Huang-style running histogram). Unlike a
+// Gaussian blur it simplifies into coherent shapes WITHOUT averaging small
+// bright accents (eye-whites, specular highlights) down into their darker
+// surroundings — so they survive thresholding instead of muddying into a
+// mid-tone. Radius scales with the Squint amount.
+export function medianRadiusFor(squint: number, w: number, h: number): number {
+  return Math.min(40, Math.round((squint / 100) * 0.035 * Math.min(w, h)))
+}
+
+// One separable pass. `stride` walks the filtered axis (1 = rows, w = columns);
+// `len` is that axis's length, `lines` the count of independent lines, and
+// `base(line)` the buffer offset of each line's first sample.
+function medianPass(
+  s: Uint8ClampedArray,
+  t: Uint8ClampedArray,
+  lines: number,
+  len: number,
+  stride: number,
+  base: (line: number) => number,
+  r: number,
+): void {
+  const hist = new Uint32Array(256)
+  for (let line = 0; line < lines; line++) {
+    const off = base(line)
+    hist.fill(0)
+    for (let j = -r; j <= r; j++) {
+      const k = j < 0 ? 0 : j >= len ? len - 1 : j
+      hist[s[off + k * stride]]++
+    }
+    // Running median: smallest value `med` whose window rank is r (0-indexed),
+    // tracked via `lt` = count of samples strictly below `med`.
+    let med = 0
+    let lt = 0
+    while (lt + hist[med] <= r) {
+      lt += hist[med]
+      med++
+    }
+    t[off] = med
+    for (let i = 1; i < len; i++) {
+      let o = i - 1 - r
+      o = o < 0 ? 0 : o >= len ? len - 1 : o
+      const ov = s[off + o * stride]
+      hist[ov]--
+      if (ov < med) lt--
+      let p = i + r
+      p = p < 0 ? 0 : p >= len ? len - 1 : p
+      const pv = s[off + p * stride]
+      hist[pv]++
+      if (pv < med) lt++
+      while (lt > r) {
+        med--
+        lt -= hist[med]
+      }
+      while (lt + hist[med] <= r) {
+        lt += hist[med]
+        med++
+      }
+      t[off + i * stride] = med
+    }
+  }
+}
+
+export function medianBlur(src: Uint8ClampedArray, w: number, h: number, r: number): Uint8ClampedArray {
+  if (r < 1) return src.slice()
+  const a = new Uint8ClampedArray(src.length)
+  const b = new Uint8ClampedArray(src.length)
+  medianPass(src, a, h, w, 1, (y) => y * w, r) // horizontal
+  medianPass(a, b, w, h, w, (x) => x, r) // vertical
+  return b
+}
+
+// --- Despeckle: absorb tiny value-islands into their neighbours -----------
+// The median pass removes most noise, but a few small disconnected blobs of a
+// value can remain. Merging anything below `minArea` px into the dominant
+// surrounding value gives the clean, connected masses an artist blocks in.
+export function despeckleMinArea(w: number, h: number): number {
+  return Math.max(8, Math.round(w * h * 0.00003))
+}
+
+function despeckle(idx: Uint8Array, w: number, minArea: number): void {
+  const n = idx.length
+  const visited = new Uint8Array(n)
+  const queue = new Int32Array(n)
+  const comp = new Int32Array(n)
+  const tally = new Uint32Array(8)
+  for (let start = 0; start < n; start++) {
+    if (visited[start]) continue
+    const lvl = idx[start]
+    let qh = 0
+    let qt = 0
+    let cn = 0
+    queue[qt++] = start
+    visited[start] = 1
+    while (qh < qt) {
+      const p = queue[qh++]
+      comp[cn++] = p
+      const x = p % w
+      if (x > 0 && !visited[p - 1] && idx[p - 1] === lvl) (visited[p - 1] = 1), (queue[qt++] = p - 1)
+      if (x < w - 1 && !visited[p + 1] && idx[p + 1] === lvl) (visited[p + 1] = 1), (queue[qt++] = p + 1)
+      if (p - w >= 0 && !visited[p - w] && idx[p - w] === lvl) (visited[p - w] = 1), (queue[qt++] = p - w)
+      if (p + w < n && !visited[p + w] && idx[p + w] === lvl) (visited[p + w] = 1), (queue[qt++] = p + w)
+    }
+    if (cn >= minArea) continue
+    // Reassign this small blob to the value it borders most.
+    tally.fill(0)
+    for (let i = 0; i < cn; i++) {
+      const p = comp[i]
+      const x = p % w
+      if (x > 0 && idx[p - 1] !== lvl) tally[idx[p - 1]]++
+      if (x < w - 1 && idx[p + 1] !== lvl) tally[idx[p + 1]]++
+      if (p - w >= 0 && idx[p - w] !== lvl) tally[idx[p - w]]++
+      if (p + w < n && idx[p + w] !== lvl) tally[idx[p + w]]++
+    }
+    let best = lvl
+    let bestC = 0
+    for (let L = 0; L < tally.length; L++) {
+      if (tally[L] > bestC) {
+        bestC = tally[L]
+        best = L
+      }
+    }
+    if (bestC > 0) for (let i = 0; i < cn; i++) idx[comp[i]] = best
+  }
+}
+
 // --- Posterize ------------------------------------------------------------
-export function process(luma: Uint8ClampedArray, thresholds: number[], levels: number[]): Processed {
-  const lut = new Uint8ClampedArray(256)
+export function process(
+  luma: Uint8ClampedArray,
+  w: number,
+  thresholds: number[],
+  levels: number[],
+  minArea = 0,
+): Processed {
+  const band = new Uint8Array(256)
   for (let v = 0; v < 256; v++) {
     let b = 0
     while (b < thresholds.length && v >= thresholds[b]) b++
-    lut[v] = levels[b]
+    band[v] = b
   }
+  const total = luma.length
+  const idx = new Uint8Array(total)
+  for (let i = 0; i < total; i++) idx[i] = band[luma[i]]
+
+  if (minArea > 1) despeckle(idx, w, minArea)
+
   const n = levels.length
   const counts = new Uint32Array(n)
-  const total = luma.length
   const rgba = new Uint8ClampedArray(total * 4)
   for (let i = 0, o = 0; i < total; i++, o += 4) {
-    const v = luma[i]
-    let b = 0
-    while (b < thresholds.length && v >= thresholds[b]) b++
+    const b = idx[i]
     counts[b]++
-    const g = lut[v]
+    const g = levels[b]
     rgba[o] = g
     rgba[o + 1] = g
     rgba[o + 2] = g
