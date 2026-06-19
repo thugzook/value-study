@@ -11,7 +11,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   tones: 3,
-  squint: 35,
+  squint: 10,
   balance: 0,
   mode: 'auto',
 }
