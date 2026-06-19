@@ -231,75 +231,84 @@ export function sigmaFor(squint: number, w: number, h: number): number {
 }
 
 // --- Median filter: edge-preserving "squint" ------------------------------
-// A separable sliding-window median (Huang-style running histogram). Unlike a
-// Gaussian blur it simplifies into coherent shapes WITHOUT averaging small
-// bright accents (eye-whites, specular highlights) down into their darker
-// surroundings — so they survive thresholding instead of muddying into a
-// mid-tone. Radius scales with the Squint amount.
+// A circular (disk) sliding-window median (Huang-style running histogram). The
+// disk window is isotropic, so it simplifies into smooth, rounded masses rather
+// than the axis-aligned staircase a separable (H-then-V) median produces — while
+// still preserving hard edges and small bright accents (eye-whites, speculars)
+// instead of averaging them down into a mid-tone the way a Gaussian blur would.
+// Radius scales with the Squint amount.
 export function medianRadiusFor(squint: number, w: number, h: number): number {
   return Math.min(40, Math.round((squint / 100) * 0.035 * Math.min(w, h)))
 }
 
-// One separable pass. `stride` walks the filtered axis (1 = rows, w = columns);
-// `len` is that axis's length, `lines` the count of independent lines, and
-// `base(line)` the buffer offset of each line's first sample.
-function medianPass(
-  s: Uint8ClampedArray,
-  t: Uint8ClampedArray,
-  lines: number,
-  len: number,
-  stride: number,
-  base: (line: number) => number,
-  r: number,
-): void {
+export function medianBlur(src: Uint8ClampedArray, w: number, h: number, r: number): Uint8ClampedArray {
+  if (r < 1) return src.slice()
+  const out = new Uint8ClampedArray(src.length)
+  // Per-row half-width of the disk; window size is constant (edges replicate),
+  // so the median rank is fixed for every pixel.
+  const hw = new Int32Array(2 * r + 1)
+  let windowSize = 0
+  for (let dy = -r; dy <= r; dy++) {
+    const half = Math.floor(Math.sqrt(r * r - dy * dy))
+    hw[dy + r] = half
+    windowSize += 2 * half + 1
+  }
+  const rank = windowSize >> 1 // 0-indexed median position
   const hist = new Uint32Array(256)
-  for (let line = 0; line < lines; line++) {
-    const off = base(line)
+
+  for (let y = 0; y < h; y++) {
     hist.fill(0)
-    for (let j = -r; j <= r; j++) {
-      const k = j < 0 ? 0 : j >= len ? len - 1 : j
-      hist[s[off + k * stride]]++
+    // Build the disk window centred at x = 0 (columns clamped at the edge).
+    for (let dy = -r; dy <= r; dy++) {
+      let yy = y + dy
+      yy = yy < 0 ? 0 : yy >= h ? h - 1 : yy
+      const row = yy * w
+      const half = hw[dy + r]
+      for (let dx = -half; dx <= half; dx++) {
+        const xx = dx < 0 ? 0 : dx >= w ? w - 1 : dx
+        hist[src[row + xx]]++
+      }
     }
-    // Running median: smallest value `med` whose window rank is r (0-indexed),
-    // tracked via `lt` = count of samples strictly below `med`.
+    // Running median: smallest value `med` at the window rank, with `lt` = count
+    // of samples strictly below `med`.
     let med = 0
     let lt = 0
-    while (lt + hist[med] <= r) {
+    while (lt + hist[med] <= rank) {
       lt += hist[med]
       med++
     }
-    t[off] = med
-    for (let i = 1; i < len; i++) {
-      let o = i - 1 - r
-      o = o < 0 ? 0 : o >= len ? len - 1 : o
-      const ov = s[off + o * stride]
-      hist[ov]--
-      if (ov < med) lt--
-      let p = i + r
-      p = p < 0 ? 0 : p >= len ? len - 1 : p
-      const pv = s[off + p * stride]
-      hist[pv]++
-      if (pv < med) lt++
-      while (lt > r) {
+    out[y * w] = med
+    for (let x = 1; x < w; x++) {
+      // Slide the disk one column right: per row, drop the leftmost cell of the
+      // previous window and add the new rightmost cell.
+      for (let dy = -r; dy <= r; dy++) {
+        let yy = y + dy
+        yy = yy < 0 ? 0 : yy >= h ? h - 1 : yy
+        const row = yy * w
+        const half = hw[dy + r]
+        let ox = x - 1 - half
+        ox = ox < 0 ? 0 : ox >= w ? w - 1 : ox
+        const ov = src[row + ox]
+        hist[ov]--
+        if (ov < med) lt--
+        let nx = x + half
+        nx = nx < 0 ? 0 : nx >= w ? w - 1 : nx
+        const nv = src[row + nx]
+        hist[nv]++
+        if (nv < med) lt++
+      }
+      while (lt > rank) {
         med--
         lt -= hist[med]
       }
-      while (lt + hist[med] <= r) {
+      while (lt + hist[med] <= rank) {
         lt += hist[med]
         med++
       }
-      t[off + i * stride] = med
+      out[y * w + x] = med
     }
   }
-}
-
-export function medianBlur(src: Uint8ClampedArray, w: number, h: number, r: number): Uint8ClampedArray {
-  if (r < 1) return src.slice()
-  const a = new Uint8ClampedArray(src.length)
-  const b = new Uint8ClampedArray(src.length)
-  medianPass(src, a, h, w, 1, (y) => y * w, r) // horizontal
-  medianPass(a, b, w, h, w, (x) => x, r) // vertical
-  return b
+  return out
 }
 
 // --- Despeckle: absorb tiny value-islands into their neighbours -----------
