@@ -23,9 +23,12 @@ Vite 5/8 + React 19 + TypeScript + Tailwind 3. **Node 20** (`.nvmrc`). Deploy: V
   `gaussBlur`/`sigmaFor` remain as available helpers but are no longer in the
   active pipeline. Local accuracy/blockiness harness lives in `tuning/` (gitignored).
 - `src/lib/load.ts` — DOM glue: HEIC (lazy `heic2any`) + EXIF decode, working-size
-  canvas (capped 1600px), full-res `exportStudy`.
-- `src/components/CanvasView.tsx` — owns the canvas; caches luma + blurred result
-  (re-blurs only when Squint changes); rAF-coalesced redraw.
+  canvas (`PROC_EDGE` 760px — a value study needs masses, not pixels; keeps the
+  median fast on mobile), `exportStudy` (capped `EXPORT_EDGE` 2000px).
+- `src/components/CanvasView.tsx` — owns the canvas; caches luma + blurred result.
+  The median (expensive) recomputes only when Squint settles (120ms debounce via
+  `renderSquint`); tone/balance changes redraw instantly off the cached blur.
+  rAF-coalesced redraw.
 - `src/App.tsx` — state + layout; `Controls`, `Legend`, `Dropzone`.
 
 ## Conventions

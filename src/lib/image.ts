@@ -11,7 +11,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   tones: 3,
-  squint: 10,
+  squint: 25, // a clean block-in by default, not a noisy sharp posterize
   balance: 0,
   mode: 'auto',
 }

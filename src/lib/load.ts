@@ -16,7 +16,11 @@ export interface Source {
   height: number
 }
 
-const MAX_EDGE = 1600
+// A value study is about big masses, not pixels. Process the live preview at a
+// modest edge so the squint reads as clean shapes (not pores/stray hairs) AND
+// the per-frame median filter stays fast on mobile. Export renders larger.
+const PROC_EDGE = 760
+const EXPORT_EDGE = 2000
 
 async function decodeBlob(blob: Blob): Promise<ImageBitmap> {
   // imageOrientation 'from-image' respects EXIF so phone photos aren't sideways.
@@ -70,10 +74,13 @@ export interface Working {
   h: number
 }
 
+function sizeFor(src: Source, edge: number) {
+  const scale = Math.min(1, edge / Math.max(src.width, src.height))
+  return { w: Math.max(1, Math.round(src.width * scale)), h: Math.max(1, Math.round(src.height * scale)) }
+}
+
 export function makeWorking(src: Source): Working {
-  const scale = Math.min(1, MAX_EDGE / Math.max(src.width, src.height))
-  const w = Math.max(1, Math.round(src.width * scale))
-  const h = Math.max(1, Math.round(src.height * scale))
+  const { w, h } = sizeFor(src, PROC_EDGE)
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
@@ -82,21 +89,22 @@ export function makeWorking(src: Source): Working {
   return { canvas, w, h }
 }
 
-// Re-applies the current settings to the full-resolution original and downloads it.
+// Re-applies the current settings at export resolution and downloads it.
 export async function exportStudy(src: Source, settings: Settings): Promise<void> {
+  const { w, h } = sizeFor(src, EXPORT_EDGE)
   const canvas = document.createElement('canvas')
-  canvas.width = src.width
-  canvas.height = src.height
+  canvas.width = w
+  canvas.height = h
   const ctx = canvas.getContext('2d')!
-  ctx.drawImage(src.bitmap, 0, 0)
-  const id = ctx.getImageData(0, 0, src.width, src.height)
+  ctx.drawImage(src.bitmap, 0, 0, w, h)
+  const id = ctx.getImageData(0, 0, w, h)
   const luma = toLuma(id.data)
-  const radius = medianRadiusFor(settings.squint, src.width, src.height)
-  const blurred = medianBlur(luma, src.width, src.height, radius)
+  const radius = medianRadiusFor(settings.squint, w, h)
+  const blurred = medianBlur(luma, w, h, radius)
   const thresholds = computeThresholds(blurred, settings.tones, settings.mode, settings.balance)
   const levels = evenLevels(settings.tones)
-  const { rgba } = process(blurred, src.width, thresholds, levels, despeckleMinArea(src.width, src.height))
-  const out = ctx.createImageData(src.width, src.height)
+  const { rgba } = process(blurred, w, thresholds, levels, despeckleMinArea(w, h))
+  const out = ctx.createImageData(w, h)
   out.data.set(rgba)
   ctx.putImageData(out, 0, 0)
 

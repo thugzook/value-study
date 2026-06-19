@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Coverage, Settings } from '../lib/image'
 import {
   toLuma,
@@ -26,6 +26,15 @@ export default function CanvasView({ source, settings, compare, onCoverage }: Pr
   const dimsRef = useRef({ w: 0, h: 0 })
   const blurRef = useRef<{ squint: number; data: Uint8ClampedArray } | null>(null)
   const rafRef = useRef<number | null>(null)
+
+  // The median is the expensive step, so only recompute it once the Squint
+  // slider settles — dragging stays smooth, especially on mobile. Tone/balance
+  // changes redraw instantly off the cached blur.
+  const [renderSquint, setRenderSquint] = useState(settings.squint)
+  useEffect(() => {
+    const id = setTimeout(() => setRenderSquint(settings.squint), 120)
+    return () => clearTimeout(id)
+  }, [settings.squint])
 
   // Decode source into a working-size luma buffer (cached).
   useEffect(() => {
@@ -57,9 +66,9 @@ export default function CanvasView({ source, settings, compare, onCoverage }: Pr
         return
       }
 
-      const radius = medianRadiusFor(settings.squint, w, h)
-      if (!blurRef.current || blurRef.current.squint !== settings.squint) {
-        blurRef.current = { squint: settings.squint, data: medianBlur(luma, w, h, radius) }
+      const radius = medianRadiusFor(renderSquint, w, h)
+      if (!blurRef.current || blurRef.current.squint !== renderSquint) {
+        blurRef.current = { squint: renderSquint, data: medianBlur(luma, w, h, radius) }
       }
       const blurred = blurRef.current.data
       const thresholds = computeThresholds(blurred, settings.tones, settings.mode, settings.balance)
@@ -76,7 +85,7 @@ export default function CanvasView({ source, settings, compare, onCoverage }: Pr
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
     }
-  }, [source, settings, compare, onCoverage])
+  }, [source, renderSquint, settings.tones, settings.mode, settings.balance, compare, onCoverage])
 
   return (
     <canvas
