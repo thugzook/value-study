@@ -29,7 +29,11 @@ Vite 5/8 + React 19 + TypeScript + Tailwind 3. **Node 20** (`.nvmrc`). Deploy: V
   The median (expensive) recomputes only when Squint settles (120ms debounce via
   `renderSquint`); tone/balance changes redraw instantly off the cached blur.
   rAF-coalesced redraw.
-- `src/App.tsx` — state + layout; `Controls`, `Legend`, `Dropzone`.
+- `src/App.tsx` — state + responsive layout. Desktop (`md+`): canvas + `aside`.
+  Mobile: canvas fills, controls live in a draggable `BottomSheet` (peek shows
+  Exercise + Squint; drag/tap the handle to expand) — no page scroll. Layout +
+  pointer mode switch on `useMediaQuery`. "See original" is hold-to-peek with a
+  mouse, tap-to-toggle on touch. Hosts `Controls`, `Legend`, `Dropzone`.
 
 ## Conventions
 - Build ImageData via `ctx.createImageData(w,h)` + `.data.set(rgba)` (TS6 rejects
