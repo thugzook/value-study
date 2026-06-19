@@ -39,6 +39,23 @@ export async function loadImageFile(file: File): Promise<Source> {
   }
 }
 
+export async function loadImageUrl(url: string): Promise<Source> {
+  let res: Response
+  try {
+    res = await fetch(`/api/fetch-image?url=${encodeURIComponent(url)}`)
+  } catch {
+    throw new Error("Couldn't reach that link.")
+  }
+  if (!res.ok) throw new Error("Couldn't load that image. Check the link and try again.")
+  const blob = await res.blob()
+  try {
+    const bitmap = await decodeBlob(blob)
+    return { bitmap, width: bitmap.width, height: bitmap.height }
+  } catch {
+    throw new Error("That link didn't point to a usable image.")
+  }
+}
+
 export interface Working {
   canvas: HTMLCanvasElement
   w: number

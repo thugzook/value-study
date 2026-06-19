@@ -5,7 +5,7 @@ import Controls from './components/Controls'
 import Legend from './components/Legend'
 import { DEFAULT_SETTINGS } from './lib/image'
 import type { Coverage, Settings } from './lib/image'
-import { loadImageFile, exportStudy } from './lib/load'
+import { loadImageFile, loadImageUrl, exportStudy } from './lib/load'
 import type { Source } from './lib/load'
 
 export default function App() {
@@ -30,15 +30,34 @@ export default function App() {
     }
   }, [])
 
-  // Paste an image from the clipboard anywhere on the page.
+  const handleUrl = useCallback(async (url: string) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const src = await loadImageUrl(url)
+      setSource(src)
+      setCompare(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load that image.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Paste an image (or an image link) from the clipboard anywhere on the page.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const f = e.clipboardData?.files?.[0]
-      if (f && f.type.startsWith('image')) void handleFile(f)
+      if (f && f.type.startsWith('image')) {
+        void handleFile(f)
+        return
+      }
+      const text = e.clipboardData?.getData('text')?.trim()
+      if (text && /^https?:\/\//i.test(text)) void handleUrl(text)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [handleFile])
+  }, [handleFile, handleUrl])
 
   const onCoverage = useCallback((c: Coverage[]) => setCoverage(c), [])
 
@@ -66,7 +85,7 @@ export default function App() {
       <main className="flex flex-1 flex-col gap-4 overflow-hidden p-4 md:flex-row">
         {!source ? (
           <div className="flex flex-1 items-center justify-center">
-            <Dropzone onFile={handleFile} loading={loading} error={error} />
+            <Dropzone onFile={handleFile} onUrl={handleUrl} loading={loading} error={error} />
           </div>
         ) : (
           <>
